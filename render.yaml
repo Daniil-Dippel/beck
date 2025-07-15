@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: caite-backend
+    runtime: python
+    buildCommand: ""
+    startCommand: gunicorn app:app
+    envVars:
+      - key: OPENAI_API_KEY
+        value: sk-...тут_ваш_ключ...

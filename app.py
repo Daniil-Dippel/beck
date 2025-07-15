@@ -13,7 +13,7 @@ from flask_limiter.util import get_remote_address
 app = Flask(__name__)
 
 # --- Ограничение CORS (разрешаем только frontend-домен) ---
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5500", "https://ваш-домен.com"]}})
+CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5500", "http://127.0.0.1:5500", "https://ваш-домен.com"]}})
 
 # --- Ограничение по IP (например: 10 запросов в минуту на чат и форму) ---
 limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per day", "10 per minute"])

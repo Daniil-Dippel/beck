@@ -1,115 +1,126 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from sqlalchemy import create_engine, Column, Integer, String, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from openai import OpenAI
-import re
-import html
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import requests
+import re
+import html
+import os
+import openai
 
-# --- Flask ---
+# --- Flask setup ---
 app = Flask(__name__)
-
-# --- Ограничение CORS (разрешаем только frontend-домен) ---
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5500", "http://127.0.0.1:5500", "https://ваш-домен.com"]}})
-
-# --- Ограничение по IP (например: 10 запросов в минуту на чат и форму) ---
+# Разрешаем запросы только с указанных фронтенд-доменов
+CORS(app, resources={r"/api/*": {"origins": [
+    "https://caito-muit.github.io",
+    "https://daniildippel.github.io",
+    "http://localhost:5173",
+    "http://127.0.0.1:5501",  # для локальной разработки
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1:5500"   # если фронтенд тоже на этом порту
+]}})
+# Ограничение скорости и по IP
 limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per day", "10 per minute"])
 
-# --- OpenAI ---
-client = OpenAI(api_key="sk-proj-ВАШ_КЛЮЧ")
+# --- MockAPI endpoints ---
+CATALOG_URL = "https://6859802a138a18086dfea5ea.mockapi.io/kashchei777/catalog"
+LOG_URL     = "https://6859802a138a18086dfea5ea.mockapi.io/kashchei777/log"
 
-assistant_context = (
+# --- OpenAI setup ---
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Задайте переменную окружения OPENAI_API_KEY
+MODEL_NAME = "gpt-3.5-turbo"
+ASSISTANT_CONTEXT = (
     "Ты — Фелис, дружелюбный ассистент компании CAITO M.U.I.T. "
     "Ты говоришь на русском, профессионально и понятно."
 )
 
-# --- SQLite и SQLAlchemy ---
-engine = create_engine('sqlite:///requests.db', echo=False)
-Base = declarative_base()
-SessionLocal = sessionmaker(bind=engine)
+# --- Validation & sanitization ---
+def sanitize(text: str) -> str:
+    return html.escape(text.strip())
 
-class RequestForm(Base):
-    __tablename__ = "requests"
-    id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=False)
-    email = Column(String(100))
-    message = Column(Text)
-
-Base.metadata.create_all(bind=engine)
-
-# --- Валидация и защита ---
-def sanitize(text):
-    return html.escape(text.strip())  # Защита от XSS
-
-def is_valid_email(email):
+def is_valid_email(email: str) -> bool:
     return re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email)
 
-def is_valid_phone(phone):
+def is_valid_phone(phone: str) -> bool:
     return re.match(r"^\+?\d{9,15}$", phone)
 
-# --- Чат с OpenAI ---
-@app.route('/api/chat', methods=['POST'])
-@limiter.limit("10 per minute")
-def chat():
-    data = request.json
-    messages = data.get("messages", [])
-
-    if not messages:
-        return jsonify({"response": "..."})
-
+# --- Proxy-only GET catalog ---
+@app.route('/api/catalog', methods=['GET'])
+def get_catalog():
     try:
-        chatgpt_messages = [{"role": "system", "content": assistant_context}]
-        for msg in messages:
-            role = "user" if msg["speaker"] == "user" else "assistant"
-            chatgpt_messages.append({"role": role, "content": sanitize(msg["text"])})
-
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=chatgpt_messages,
-            temperature=0.7,
-            max_tokens=512,
-        )
-
-        reply = response.choices[0].message.content.strip()
-        return jsonify({"response": reply})
-
+        resp = requests.get(CATALOG_URL)
+        return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({"response": f"Ошибка: {e}"}), 500
+        return jsonify({"error": f"Не удалось загрузить каталог: {e}"}), 500
 
-# --- Приём заявок ---
+# --- Proxy-only GET all requests ---
+@app.route('/api/requests', methods=['GET'])
+def list_requests():
+    try:
+        resp = requests.get(LOG_URL)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"error": f"Не удалось загрузить список заявок: {e}"}), 500
+
+# --- Receive and forward new request ---
 @app.route('/api/request', methods=['POST'])
 @limiter.limit("10 per minute")
 def receive_request():
-    data = request.json
-
-    name = sanitize(data.get("name", ""))
-    phone = sanitize(data.get("phone", ""))
-    email = sanitize(data.get("email", ""))
-    message = sanitize(data.get("message", ""))
+    data = request.json or {}
+    name = sanitize(data.get('name', ''))
+    phone = sanitize(data.get('phone', ''))
+    email = sanitize(data.get('email', ''))
+    message = sanitize(data.get('message', ''))
 
     if not name or not phone:
         return jsonify({"status": "error", "message": "Имя и телефон обязательны"}), 400
-
     if email and not is_valid_email(email):
         return jsonify({"status": "error", "message": "Некорректный email"}), 400
-
     if not is_valid_phone(phone):
         return jsonify({"status": "error", "message": "Некорректный номер телефона"}), 400
 
+    payload = {"name": name, "phone": phone, "email": email, "message": message}
     try:
-        db = SessionLocal()
-        new_request = RequestForm(name=name, phone=phone, email=email, message=message)
-        db.add(new_request)
-        db.commit()
-        db.close()
-        return jsonify({"status": "success", "message": "Заявка принята!"})
+        resp = requests.post(LOG_URL, json=payload)
+        if resp.status_code in (200, 201):
+            return jsonify({"status": "success", "message": "Заявка успешно отправлена"}), resp.status_code
+        return jsonify({"status": "error", "message": "Ошибка MockAPI"}), resp.status_code
     except Exception as e:
         return jsonify({"status": "error", "message": f"Ошибка сервера: {e}"}), 500
 
-# --- Запуск ---
+# --- Chat with OpenAI GPT-3.5 ---
+@app.route('/api/chat', methods=['POST'])
+@limiter.limit("20 per minute")
+def chat():
+    data = request.json or {}
+    messages = data.get('messages', [])
+    if not isinstance(messages, list) or not messages:
+        return jsonify({"error": "Нужен список сообщений"}), 400
+
+    history = [{"role": "system", "content": ASSISTANT_CONTEXT}]
+    for msg in messages:
+        role = msg.get('role')
+        content = sanitize(msg.get('content', ''))
+        if role in ('user', 'assistant') and content:
+            history.append({"role": role, "content": content})
+
+    try:
+        resp = openai.ChatCompletion.create(
+            model=MODEL_NAME,
+            messages=history,
+            temperature=0.7,
+            max_tokens=512
+        )
+        reply = resp.choices[0].message.content.strip()
+        return jsonify({"message": reply})
+    except Exception as e:
+        return jsonify({"error": f"OpenAI API error: {e}"}), 500
+
+# --- Блокировка всех прочих методов ---
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"error": "Метод запрещен"}), 405
+
+# --- Запуск приложения ---
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

@@ -14,7 +14,8 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": [
     "https://daniil-dippel.github.io/caite-intuit_cheese",
     "http://127.0.0.1:5501",  # для локальной разработки
-    "http://127.0.0.1:5000"  # если фронтенд тоже на этом порту
+    "http://127.0.0.1:5000",
+    "https://daniil-dippel.github.io"# если фронтенд тоже на этом порту
 ]}})
 # Ограничение скорости и по IP
 limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per day", "10 per minute"])

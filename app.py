@@ -13,11 +13,8 @@ app = Flask(__name__)
 # Разрешаем запросы только с указанных фронтенд-доменов
 CORS(app, resources={r"/api/*": {"origins": [
     "https://caito-muit.github.io",
-    "https://daniildippel.github.io",
-    "http://localhost:5173",
     "http://127.0.0.1:5501",  # для локальной разработки
-    "http://127.0.0.1:5000",
-    "http://127.0.0.1:5500"   # если фронтенд тоже на этом порту
+    "http://127.0.0.1:5000"  # если фронтенд тоже на этом порту
 ]}})
 # Ограничение скорости и по IP
 limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per day", "10 per minute"])

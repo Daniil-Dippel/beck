@@ -12,7 +12,7 @@ import openai
 app = Flask(__name__)
 # Разрешаем запросы только с указанных фронтенд-доменов
 CORS(app, resources={r"/api/*": {"origins": [
-    "https://caito-muit.github.io",
+    "https://daniil-dippel.github.io/caite-intuit_cheese",
     "http://127.0.0.1:5501",  # для локальной разработки
     "http://127.0.0.1:5000"  # если фронтенд тоже на этом порту
 ]}})
